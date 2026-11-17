@@ -1,0 +1,21 @@
+{
+  "family": "my-docker-app-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::940702769629:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "my-web-app",
+      "image": "940702769629.dkr.ecr.eu-north-1.amazonaws.com/my-web-app:latest",
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true
+    }
+  ]
+}

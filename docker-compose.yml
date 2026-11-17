@@ -1,0 +1,18 @@
+﻿services:
+  app1:
+    build:
+      context: ./app1
+    image: my-docker-app/app1:latest
+    container_name: app1
+    ports:
+      - "8081:5000"
+    restart: unless-stopped
+
+  app2:
+    build:
+      context: ./app2
+    image: my-docker-app/app2:latest
+    container_name: app2
+    ports:
+      - "8082:5000"
+    restart: unless-stopped
