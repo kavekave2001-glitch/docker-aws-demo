@@ -1,9 +1,14 @@
-name: Build and Push Docker to AWS ECR
+name: Build and Push Docker Images to AWS ECR
 
 on:
   push:
     branches:
       - main
+    paths:
+      - 'app1/**'
+      - 'app2/**'
+      - '.github/workflows/docker-ecr.yml'
+
   workflow_dispatch:
 
 permissions:
@@ -16,7 +21,6 @@ concurrency:
 
 jobs:
   build-and-push:
-    name: Build and Push Docker Image
     runs-on: ubuntu-latest
 
     steps:
@@ -37,29 +41,35 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag and push Docker image
+      - name: Build and push App1
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build \
-            -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
-            -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" \
-            .
+            -t "$ECR_REGISTRY/my-docker-app/app1:$IMAGE_TAG" \
+            -t "$ECR_REGISTRY/my-docker-app/app1:latest" \
+            ./app1
 
-          docker push \
-            "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/my-docker-app/app1:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/my-docker-app/app1:latest"
 
-          docker push \
-            "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
-
-      - name: Deployment summary
+      - name: Build and push App2
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "### Docker image pushed to ECR" >> "$GITHUB_STEP_SUMMARY"
-          echo "Repository: $ECR_REGISTRY/$ECR_REPOSITORY" >> "$GITHUB_STEP_SUMMARY"
-          echo "Image tag: $IMAGE_TAG" >> "$GITHUB_STEP_SUMMARY"
+          docker build \
+            -t "$ECR_REGISTRY/my-docker-app/app2:$IMAGE_TAG" \
+            -t "$ECR_REGISTRY/my-docker-app/app2:latest" \
+            ./app2
+
+          docker push "$ECR_REGISTRY/my-docker-app/app2:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/my-docker-app/app2:latest"
+
+      - name: Deployment summary
+        run: |
+          echo "### Successfully published Docker images" >> "$GITHUB_STEP_SUMMARY"
+          echo "App1: my-docker-app/app1" >> "$GITHUB_STEP_SUMMARY"
+          echo "App2: my-docker-app/app2" >> "$GITHUB_STEP_SUMMARY"
+          echo "Image tag: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
