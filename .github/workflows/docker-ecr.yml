@@ -1,4 +1,5 @@
-name: Build and Push Docker Images to AWS ECR
+
+name: Build and Deploy Two Applications to AWS ECS
 
 on:
   push:
@@ -16,11 +17,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: ecr-push-${{ github.ref }}
+  group: production-deployment
   cancel-in-progress: false
 
+env:
+  AWS_REGION: eu-north-1
+  ECS_CLUSTER: my-docker-app-cluster
+
 jobs:
-  build-and-push:
+  build-and-deploy:
+    name: Build, Push and Deploy
     runs-on: ubuntu-latest
 
     steps:
@@ -28,11 +34,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v6.3.0
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: GitHubActionsECRPush
+          role-session-name: GitHubActionsECSDeployment
 
       - name: Verify AWS identity
         run: aws sts get-caller-identity
@@ -41,6 +47,10 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # -------------------------
+      # BUILD AND PUSH APP1
+      # -------------------------
+
       - name: Build and push App1
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -48,11 +58,14 @@ jobs:
         run: |
           docker build \
             -t "$ECR_REGISTRY/my-docker-app/app1:$IMAGE_TAG" \
-            -t "$ECR_REGISTRY/my-docker-app/app1:latest" \
             ./app1
 
-          docker push "$ECR_REGISTRY/my-docker-app/app1:$IMAGE_TAG"
-          docker push "$ECR_REGISTRY/my-docker-app/app1:latest"
+          docker push \
+            "$ECR_REGISTRY/my-docker-app/app1:$IMAGE_TAG"
+
+      # -------------------------
+      # BUILD AND PUSH APP2
+      # -------------------------
 
       - name: Build and push App2
         env:
@@ -61,15 +74,136 @@ jobs:
         run: |
           docker build \
             -t "$ECR_REGISTRY/my-docker-app/app2:$IMAGE_TAG" \
-            -t "$ECR_REGISTRY/my-docker-app/app2:latest" \
             ./app2
 
-          docker push "$ECR_REGISTRY/my-docker-app/app2:$IMAGE_TAG"
-          docker push "$ECR_REGISTRY/my-docker-app/app2:latest"
+          docker push \
+            "$ECR_REGISTRY/my-docker-app/app2:$IMAGE_TAG"
+
+      # -------------------------
+      # DEPLOY APP1 TO ECS
+      # -------------------------
+
+      - name: Prepare App1 task definition
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition my-web-app1 \
+            --query taskDefinition \
+            --output json > app1-current.json
+
+          jq --arg IMAGE "$ECR_REGISTRY/my-docker-app/app1:$IMAGE_TAG" '
+            .containerDefinitions |= map(
+              if .name == "app1-container"
+              then .image = $IMAGE
+              else .
+              end
+            )
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .deregisteredAt,
+                .registeredBy
+              )
+          ' app1-current.json > app1-new.json
+
+      - name: Register App1 task definition
+        id: app1-task
+        run: |
+          TASK_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://app1-new.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "task_arn=$TASK_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Update App1 ECS service
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service my-web-app-service \
+            --task-definition "${{ steps.app1-task.outputs.task_arn }}"
+
+      # -------------------------
+      # DEPLOY APP2 TO ECS
+      # -------------------------
+
+      - name: Prepare App2 task definition
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition my-web-app2 \
+            --query taskDefinition \
+            --output json > app2-current.json
+
+          jq --arg IMAGE "$ECR_REGISTRY/my-docker-app/app2:$IMAGE_TAG" '
+            .containerDefinitions |= map(
+              if .name == "app2-container"
+              then .image = $IMAGE
+              else .
+              end
+            )
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .deregisteredAt,
+                .registeredBy
+              )
+          ' app2-current.json > app2-new.json
+
+      - name: Register App2 task definition
+        id: app2-task
+        run: |
+          TASK_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://app2-new.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "task_arn=$TASK_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Update App2 ECS service
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service my-web-app2-service \
+            --task-definition "${{ steps.app2-task.outputs.task_arn }}"
+
+      # -------------------------
+      # WAIT FOR DEPLOYMENTS
+      # -------------------------
+
+      - name: Wait for App1 deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services my-web-app-service
+
+      - name: Wait for App2 deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services my-web-app2-service
+
+      # -------------------------
+      # DEPLOYMENT SUMMARY
+      # -------------------------
 
       - name: Deployment summary
         run: |
-          echo "### Successfully published Docker images" >> "$GITHUB_STEP_SUMMARY"
-          echo "App1: my-docker-app/app1" >> "$GITHUB_STEP_SUMMARY"
-          echo "App2: my-docker-app/app2" >> "$GITHUB_STEP_SUMMARY"
+          echo "## AWS ECS Deployment Successful" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "App1: Deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "App2: Deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "Cluster: $ECS_CLUSTER" >> "$GITHUB_STEP_SUMMARY"
           echo "Image tag: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

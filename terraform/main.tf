@@ -60,35 +60,39 @@ resource "aws_ecr_repository" "app2" {
 
 data "aws_iam_policy_document" "ecr_access" {
 
+  # Allow GitHub Actions to deploy ECS services
   statement {
-    sid    = "ECRAuthorization"
+    sid    = "ECSDeployment"
     effect = "Allow"
 
     actions = [
-      "ecr:GetAuthorizationToken"
+      "ecs:DescribeServices",
+      "ecs:DescribeTaskDefinition",
+      "ecs:RegisterTaskDefinition",
+      "ecs:UpdateService"
     ]
 
     resources = ["*"]
   }
 
+  # Allow ECS task execution role to be passed to ECS
   statement {
-    sid    = "PushPullImages"
+    sid    = "PassECSTaskExecutionRole"
     effect = "Allow"
 
     actions = [
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:BatchGetImage",
-      "ecr:CompleteLayerUpload",
-      "ecr:GetDownloadUrlForLayer",
-      "ecr:InitiateLayerUpload",
-      "ecr:PutImage",
-      "ecr:UploadLayerPart"
+      "iam:PassRole"
     ]
 
     resources = [
-      aws_ecr_repository.app1.arn,
-      aws_ecr_repository.app2.arn
+      aws_iam_role.ecs_execution_role.arn
     ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
   }
 }
 
@@ -457,6 +461,10 @@ resource "aws_ecs_service" "app" {
   desired_count = 1
   launch_type   = "FARGATE"
 
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
   network_configuration {
     subnets = data.aws_subnets.default.ids
 
@@ -490,6 +498,10 @@ resource "aws_ecs_service" "app2" {
 
   desired_count = 1
   launch_type   = "FARGATE"
+
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
 
   network_configuration {
     subnets = data.aws_subnets.default.ids
