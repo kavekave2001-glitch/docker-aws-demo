@@ -1,8 +1,10 @@
-@'
+﻿# Terraform
 .terraform/
 *.tfstate
 *.tfstate.*
 *.tfplan
+*.plan
+tfplan
 crash.log
 crash.*.log
 *.tfvars
@@ -10,11 +12,15 @@ crash.*.log
 !*.tfvars.example
 .terraform.tfstate.lock.info
 
+# Environment files
 .env
 .env.*
 !.env.example
+
+# Python
 __pycache__/
 *.pyc
 .venv/
+
+# IDE
 .vscode/
-'@ | Set-Content -Encoding utf8 .gitignore
